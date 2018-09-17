@@ -62,9 +62,12 @@ def print_out(s, f=None, new_line=True):
 
   # stdout
   out_s = s.encode("utf-8")
-  if not isinstance(out_s, str):
-    out_s = out_s.decode("utf-8")
-  print(out_s, end="", file=sys.stdout)
+  # if not isinstance(out_s, str):
+  #   out_s = out_s.decode("utf-8")
+  # print(out_s, end="", file=sys.stdout)
+  # to avoid UnicodeEncodeError exception
+  sys.stdout.buffer.write(out_s)
+
 
   if new_line:
     sys.stdout.write("\n")

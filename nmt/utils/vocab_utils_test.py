@@ -23,7 +23,7 @@ import codecs
 import os
 import tensorflow as tf
 
-from ..utils import vocab_utils
+from utils import vocab_utils
 
 
 class VocabUtilsTest(tf.test.TestCase):

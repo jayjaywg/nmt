@@ -22,13 +22,13 @@ import time
 
 import tensorflow as tf
 
-from . import attention_model
-from . import gnmt_model
-from . import inference
-from . import model as nmt_model
-from . import model_helper
-from .utils import misc_utils as utils
-from .utils import nmt_utils
+import attention_model
+import gnmt_model
+import inference
+import model as nmt_model
+import model_helper
+from utils import misc_utils as utils
+from utils import nmt_utils
 
 utils.check_tensorflow_version()
 
@@ -324,8 +324,9 @@ def train(hparams, scope=None, target_session=""):
       target=target_session, config=config_proto, graph=infer_model.graph)
 
   with train_model.graph.as_default():
+    model_dir_create_or_load = hparams.pre_model_dir if hparams.pre_model_dir else model_dir
     loaded_train_model, global_step = model_helper.create_or_load_model(
-        train_model.model, model_dir, train_sess, "train")
+        train_model.model, model_dir_create_or_load, train_sess, "train")
 
   # Summary writer
   summary_writer = tf.summary.FileWriter(
@@ -512,7 +513,7 @@ def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
   }
   sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
 
-  nmt_outputs, attention_summary = model.decode(sess)
+  nmt_outputs, attention_summary, _, _ = model.decode(sess)
 
   if hparams.beam_width > 0:
     # get the top translation.

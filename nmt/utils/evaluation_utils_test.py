@@ -21,7 +21,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from ..utils import evaluation_utils
+from utils import evaluation_utils
 
 
 class EvaluationUtilsTest(tf.test.TestCase):

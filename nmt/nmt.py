@@ -25,11 +25,11 @@ import sys
 import numpy as np
 import tensorflow as tf
 
-from . import inference
-from . import train
-from .utils import evaluation_utils
-from .utils import misc_utils as utils
-from .utils import vocab_utils
+import inference
+import train
+from utils import evaluation_utils
+from utils import misc_utils as utils
+from utils import vocab_utils
 
 utils.check_tensorflow_version()
 
@@ -146,6 +146,8 @@ def add_arguments(parser):
                       help="Test prefix, expect files with src/tgt suffixes.")
   parser.add_argument("--out_dir", type=str, default=None,
                       help="Store log/model files.")
+  parser.add_argument("--pre_model_dir", type=str, default=None,
+                      help="previous model dir for continue train.")
 
   # Vocab
   parser.add_argument("--vocab_prefix", type=str, default=None, help="""\
@@ -275,6 +277,8 @@ def add_arguments(parser):
       Number of translations generated for each sentence. This is only used for
       inference.\
       """))
+  # parser.add_argument("--inference_output_encoder_vec_file", type=str, default=None,
+  #                     help="Output encoder final hidden layer vector file.")
 
   # Job info
   parser.add_argument("--jobid", type=int, default=0,
@@ -299,6 +303,7 @@ def create_hparams(flags):
       vocab_prefix=flags.vocab_prefix,
       embed_prefix=flags.embed_prefix,
       out_dir=flags.out_dir,
+      pre_model_dir=flags.pre_model_dir,
 
       # Networks
       num_units=flags.num_units,

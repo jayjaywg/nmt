@@ -18,15 +18,16 @@ from __future__ import print_function
 
 import codecs
 import time
-
+import os
+import numpy as np
 import tensorflow as tf
 
-from . import attention_model
-from . import gnmt_model
-from . import model as nmt_model
-from . import model_helper
-from .utils import misc_utils as utils
-from .utils import nmt_utils
+import attention_model
+import gnmt_model
+import model as nmt_model
+import model_helper
+from utils import misc_utils as utils
+from utils import nmt_utils
 
 __all__ = ["load_data", "inference",
            "single_worker_inference", "multi_worker_inference"]
@@ -41,14 +42,34 @@ def _decode_inference_indices(model, sess, output_infer,
   utils.print_out("  decoding to output %s , num sents %d." %
                   (output_infer, len(inference_indices)))
   start_time = time.time()
-  with codecs.getwriter("utf-8")(
-      tf.gfile.GFile(output_infer, mode="wb")) as trans_f:
-    trans_f.write("")  # Write empty string to ensure file is created.
-    for decode_id in inference_indices:
-      nmt_outputs, infer_summary = model.decode(sess)
 
+  output_encoder_vec_file = output_infer+"_encoder_vec"
+
+  with codecs.getwriter("utf-8")(
+      tf.gfile.GFile(output_infer, mode="wb")) as trans_f, codecs.getwriter("utf-8")(
+      tf.gfile.GFile(output_encoder_vec_file, mode="wb")) as trans_f_vec:
+
+    if not tf.gfile.Exists(os.path.dirname(output_infer)):
+        utils.print_out("# Creating output directory %s ..." % os.path.dirname(output_infer))
+        tf.gfile.MakeDirs(os.path.dirname(output_infer))
+    if not tf.gfile.Exists(os.path.dirname(output_encoder_vec_file)):
+        utils.print_out("# Creating output directory %s ..." % os.path.dirname(output_encoder_vec_file))
+        tf.gfile.MakeDirs(os.path.dirname(output_encoder_vec_file))
+    trans_f.write("")  # Write empty string to ensure file is created.
+    trans_f_vec.write("")  # Write empty string to ensure file is created.
+
+    for decode_id in inference_indices:
+      nmt_outputs, infer_summary, _, encoder_state = model.decode(sess)
+      if isinstance(encoder_state[-1], np.ndarray):
+          encoder_last_hidden_output = encoder_state[-1]
+      elif isinstance(encoder_state[-1], tf.contrib.rnn.LSTMStateTuple) and encoder_state[-1].__len__() == 2:
+          encoder_last_hidden_output = encoder_state[-1][1]
+      else:
+          raise ValueError("Unknown unit_type, only support lstm and gru for now")
       # get text translation
       assert nmt_outputs.shape[0] == 1
+
+      encoder_vec = encoder_last_hidden_output
       translation = nmt_utils.get_translation(
           nmt_outputs,
           sent_id=0,
@@ -64,6 +85,7 @@ def _decode_inference_indices(model, sess, output_infer,
           img_f.write(image_summ.value[0].image.encoded_image_string)
 
       trans_f.write("%s\n" % translation)
+      trans_f_vec.write((','.join(map(str, encoder_vec)) + "\n"))
       utils.print_out(translation + b"\n")
   utils.print_time("  done", start_time)
 

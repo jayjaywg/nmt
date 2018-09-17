@@ -20,9 +20,10 @@ import codecs
 import time
 import numpy as np
 import tensorflow as tf
+import os
 
-from ..utils import evaluation_utils
-from ..utils import misc_utils as utils
+from utils import evaluation_utils
+from utils import misc_utils as utils
 
 __all__ = ["decode_and_evaluate", "get_translation"]
 
@@ -43,17 +44,34 @@ def decode_and_evaluate(name,
   if decode:
     utils.print_out("  decoding to output %s." % trans_file)
 
+    output_encoder_vec_file = trans_file+"_encoder_vec"
+
     start_time = time.time()
     num_sentences = 0
     with codecs.getwriter("utf-8")(
-        tf.gfile.GFile(trans_file, mode="wb")) as trans_f:
+        tf.gfile.GFile(trans_file, mode="wb")) as trans_f,codecs.getwriter("utf-8")(
+        tf.gfile.GFile(output_encoder_vec_file, mode="wb")) as trans_f_vec:
+
+      if not tf.gfile.Exists(os.path.dirname(trans_file)):
+        utils.print_out("# Creating output directory %s ..." % os.path.dirname(trans_file))
+        tf.gfile.MakeDirs(os.path.dirname(trans_file))
       trans_f.write("")  # Write empty string to ensure file is created.
+      if not tf.gfile.Exists(os.path.dirname(output_encoder_vec_file)):
+        utils.print_out("# Creating output directory %s ..." % os.path.dirname(output_encoder_vec_file))
+        tf.gfile.MakeDirs(os.path.dirname(output_encoder_vec_file))
+      trans_f_vec.write("")  # Write empty string to ensure file is created.
 
       num_translations_per_input = max(
           min(num_translations_per_input, beam_width), 1)
       while True:
         try:
-          nmt_outputs, _ = model.decode(sess)
+          nmt_outputs, _, _, encoder_state = model.decode(sess)
+          if isinstance(encoder_state[-1], np.ndarray):
+            encoder_last_hidden_output = encoder_state[-1]
+          elif isinstance(encoder_state[-1],tf.contrib.rnn.LSTMStateTuple) and encoder_state[-1].__len__() == 2:
+            encoder_last_hidden_output = encoder_state[-1][1]
+          else:
+            raise ValueError("Unknown unit_type, only support lstm and gru for now")
           if beam_width == 0:
             nmt_outputs = np.expand_dims(nmt_outputs, 0)
 
@@ -61,6 +79,7 @@ def decode_and_evaluate(name,
           num_sentences += batch_size
 
           for sent_id in range(batch_size):
+            encoder_vec = encoder_last_hidden_output[sent_id]
             for beam_id in range(num_translations_per_input):
               translation = get_translation(
                   nmt_outputs[beam_id],
@@ -68,6 +87,7 @@ def decode_and_evaluate(name,
                   tgt_eos=tgt_eos,
                   subword_option=subword_option)
               trans_f.write((translation + b"\n").decode("utf-8"))
+            trans_f_vec.write((','.join(map(str,encoder_vec)) + "\n"))
         except tf.errors.OutOfRangeError:
           utils.print_time(
               "  done, num sentences %d, num translations per input %d" %

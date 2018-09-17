@@ -19,19 +19,19 @@ from __future__ import division
 from __future__ import print_function
 
 import abc
-
+import numpy as np
 import tensorflow as tf
 
 from tensorflow.python.layers import core as layers_core
 
-from . import model_helper
-from .utils import iterator_utils
-from .utils import misc_utils as utils
+import model_helper
+from utils import iterator_utils
+from utils import misc_utils as utils
 
 utils.check_tensorflow_version()
 
 __all__ = ["BaseModel", "Model"]
-
+MODE_SERVING = "serving"
 
 class BaseModel(object):
   """Sequence-to-sequence base class.
@@ -45,12 +45,14 @@ class BaseModel(object):
                target_vocab_table,
                reverse_target_vocab_table=None,
                scope=None,
-               extra_args=None):
+               extra_args=None,
+               src_dataset=None, #only for SERVING
+               src_seq_len=None): #only for SERVING
     """Create the model.
 
     Args:
       hparams: Hyperparameter configurations.
-      mode: TRAIN | EVAL | INFER
+      mode: TRAIN | EVAL | INFER | SERVING
       iterator: Dataset Iterator that feeds data.
       source_vocab_table: Lookup table mapping source words to ids.
       target_vocab_table: Lookup table mapping target words to ids.
@@ -60,7 +62,8 @@ class BaseModel(object):
       extra_args: model_helper.ExtraArgs, for passing customizable functions.
 
     """
-    assert isinstance(iterator, iterator_utils.BatchedInput)
+    if mode != MODE_SERVING:
+        assert isinstance(iterator, iterator_utils.BatchedInput)
     self.iterator = iterator
     self.mode = mode
     self.src_vocab_table = source_vocab_table
@@ -70,6 +73,11 @@ class BaseModel(object):
     self.tgt_vocab_size = hparams.tgt_vocab_size
     self.num_gpus = hparams.num_gpus
     self.time_major = hparams.time_major
+
+    if mode == MODE_SERVING:
+        assert src_dataset is not None
+    self.src_dataset = src_dataset #only for SERVING
+    self.src_seq_len = src_seq_len #only for SERVING
 
     # extra_args: to make it flexible for adding external customizable code
     self.single_cell_fn = None
@@ -97,7 +105,10 @@ class BaseModel(object):
 
     # Embeddings
     self.init_embeddings(hparams, scope)
-    self.batch_size = tf.size(self.iterator.source_sequence_length)
+    if mode == MODE_SERVING:
+        self.batch_size = tf.size(self.src_seq_len)
+    else:
+        self.batch_size = tf.size(self.iterator.source_sequence_length)
 
     # Projection
     with tf.variable_scope(scope or "build_network"):
@@ -116,11 +127,15 @@ class BaseModel(object):
     elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
       self.eval_loss = res[1]
     elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-      self.infer_logits, _, self.final_context_state, self.sample_id = res
+      self.infer_logits, _, self.final_context_state, self.sample_id, self.encoder_outputs, self.encoder_state= res
+      self.sample_words = reverse_target_vocab_table.lookup(
+          tf.to_int64(self.sample_id))
+    elif self.mode == MODE_SERVING:
+      self.infer_logits, _, self.final_context_state, self.sample_id, self.encoder_outputs, self.encoder_state= res
       self.sample_words = reverse_target_vocab_table.lookup(
           tf.to_int64(self.sample_id))
 
-    if self.mode != tf.contrib.learn.ModeKeys.INFER:
+    if self.mode != tf.contrib.learn.ModeKeys.INFER and self.mode != MODE_SERVING:
       ## Count the number of predicted words for compute ppl.
       self.predict_count = tf.reduce_sum(
           self.iterator.target_sequence_length)
@@ -163,7 +178,7 @@ class BaseModel(object):
           tf.summary.scalar("train_loss", self.train_loss),
       ] + grad_norm_summary)
 
-    if self.mode == tf.contrib.learn.ModeKeys.INFER:
+    if self.mode == tf.contrib.learn.ModeKeys.INFER or self.mode == MODE_SERVING:
       self.infer_summary = self._get_infer_summary(hparams)
 
     # Saver
@@ -303,14 +318,15 @@ class BaseModel(object):
           encoder_outputs, encoder_state, hparams)
 
       ## Loss
-      if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      if self.mode != tf.contrib.learn.ModeKeys.INFER and self.mode != MODE_SERVING:
         with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                    self.num_gpus)):
           loss = self._compute_loss(logits)
       else:
         loss = None
 
-      return logits, loss, final_context_state, sample_id
+      # [guwang] return encoder_outputs, encoder_state
+      return logits, loss, final_context_state, sample_id, encoder_outputs, encoder_state
 
   @abc.abstractmethod
   def _build_encoder(self, hparams):
@@ -373,18 +389,29 @@ class BaseModel(object):
                          tf.int32)
     iterator = self.iterator
 
+    if self.mode == MODE_SERVING:
+        self.source_sequence_length = self.src_seq_len
+    else:
+        self.source_sequence_length = iterator.source_sequence_length
+
     # maximum_iteration: The maximum decoding steps.
+
     maximum_iterations = self._get_infer_maximum_iterations(
-        hparams, iterator.source_sequence_length)
+    hparams, self.source_sequence_length)
 
     ## Decoder.
     with tf.variable_scope("decoder") as decoder_scope:
-      cell, decoder_initial_state = self._build_decoder_cell(
-          hparams, encoder_outputs, encoder_state,
-          iterator.source_sequence_length)
+      if self.mode == MODE_SERVING:
+        cell, decoder_initial_state = self._build_decoder_cell(
+            hparams, encoder_outputs, encoder_state,
+            self.source_sequence_length)
+      else:
+        cell, decoder_initial_state = self._build_decoder_cell(
+            hparams, encoder_outputs, encoder_state,
+            self.source_sequence_length)
 
       ## Train or eval
-      if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      if self.mode != tf.contrib.learn.ModeKeys.INFER and self.mode != MODE_SERVING:
         # decoder_emp_inp: [max_time, batch_size, num_units]
         target_input = iterator.target_input
         if self.time_major:
@@ -518,8 +545,12 @@ class BaseModel(object):
   def infer(self, sess):
     assert self.mode == tf.contrib.learn.ModeKeys.INFER
     return sess.run([
-        self.infer_logits, self.infer_summary, self.sample_id, self.sample_words
+        self.infer_logits, self.infer_summary, self.sample_id, self.sample_words, self.encoder_outputs, self.encoder_state
     ])
+
+  def infer_serving(self, sess):
+    assert self.mode == MODE_SERVING
+    return [self.infer_logits, self.infer_summary, self.sample_id, self.sample_words, self.encoder_outputs, self.encoder_state]
 
   def decode(self, sess):
     """Decode a batch.
@@ -531,16 +562,27 @@ class BaseModel(object):
       A tuple consiting of outputs, infer_summary.
         outputs: of size [batch_size, time]
     """
-    _, infer_summary, _, sample_words = self.infer(sess)
+    if self.mode == MODE_SERVING:
+        _, infer_summary, _, sample_words, encoder_outputs, encoder_state = self.infer_serving(sess)
+        # make sure outputs is of shape [batch_size, time] or [beam_width,
+        # batch_size, time] when using beam search.
+        if self.time_major:
+            sample_words = tf.transpose(sample_words)
+        elif sample_words.ndim == 3:  # beam search output in [batch_size,
+            # time, beam_width] shape.
+            sample_words = tf.transpose(sample_words, perm=[2, 0, 1])
+    else:
+        _, infer_summary, _, sample_words, encoder_outputs, encoder_state = self.infer(sess)
+        # make sure outputs is of shape [batch_size, time] or [beam_width,
+        # batch_size, time] when using beam search.
+        if self.time_major:
+            sample_words = sample_words.transpose()
+        elif sample_words.ndim == 3:
+            # beam search output in [batch_size, time, beam_width] shape.
+            sample_words = sample_words.transpose([2, 0, 1])
 
-    # make sure outputs is of shape [batch_size, time] or [beam_width,
-    # batch_size, time] when using beam search.
-    if self.time_major:
-      sample_words = sample_words.transpose()
-    elif sample_words.ndim == 3:  # beam search output in [batch_size,
-                                  # time, beam_width] shape.
-      sample_words = sample_words.transpose([2, 0, 1])
-    return sample_words, infer_summary
+
+    return sample_words, infer_summary, encoder_outputs, encoder_state
 
 
 class Model(BaseModel):
@@ -556,7 +598,12 @@ class Model(BaseModel):
     num_residual_layers = self.num_encoder_residual_layers
     iterator = self.iterator
 
-    source = iterator.source
+    if self.mode == MODE_SERVING:
+        source = self.src_dataset
+        self.source_sequence_length = tf.map_fn(lambda src: tf.size(src), self.src_dataset)
+    else:
+        source = iterator.source
+        self.source_sequence_length = iterator.source_sequence_length
     if self.time_major:
       source = tf.transpose(source)
 
@@ -577,7 +624,7 @@ class Model(BaseModel):
             cell,
             encoder_emb_inp,
             dtype=dtype,
-            sequence_length=iterator.source_sequence_length,
+            sequence_length=self.source_sequence_length,
             time_major=self.time_major,
             swap_memory=True)
       elif hparams.encoder_type == "bi":
@@ -589,7 +636,7 @@ class Model(BaseModel):
         encoder_outputs, bi_encoder_state = (
             self._build_bidirectional_rnn(
                 inputs=encoder_emb_inp,
-                sequence_length=iterator.source_sequence_length,
+                sequence_length=self.source_sequence_length,
                 dtype=dtype,
                 hparams=hparams,
                 num_bi_layers=num_bi_layers,
@@ -668,7 +715,7 @@ class Model(BaseModel):
         single_cell_fn=self.single_cell_fn)
 
     # For beam search, we need to replicate encoder infos beam_width times
-    if self.mode == tf.contrib.learn.ModeKeys.INFER and hparams.beam_width > 0:
+    if self.mode == (tf.contrib.learn.ModeKeys.INFER or self.mode == MODE_SERVING) and hparams.beam_width > 0:
       decoder_initial_state = tf.contrib.seq2seq.tile_batch(
           encoder_state, multiplier=hparams.beam_width)
     else:

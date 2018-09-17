@@ -23,11 +23,11 @@ import sys
 import numpy as np
 import tensorflow as tf
 
-from . import attention_model
-from . import gnmt_model
-from . import model
-from .utils import common_test_utils
-from .utils import nmt_utils
+import attention_model
+import gnmt_model
+import model
+from utils import common_test_utils
+from utils import nmt_utils
 
 
 float32 = np.float32

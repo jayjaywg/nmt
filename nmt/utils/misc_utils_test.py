@@ -21,7 +21,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from ..utils import misc_utils
+from utils import misc_utils
 
 
 class MiscUtilsTest(tf.test.TestCase):

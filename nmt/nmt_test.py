@@ -23,9 +23,9 @@ import os
 
 import tensorflow as tf
 
-from . import inference
-from . import nmt
-from . import train
+import inference
+import nmt
+import train
 
 
 def _update_flags(flags, test_name):
