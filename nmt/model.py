@@ -600,7 +600,7 @@ class Model(BaseModel):
 
     if self.mode == MODE_SERVING:
         source = self.src_dataset
-        self.source_sequence_length = tf.map_fn(lambda src: tf.size(src), self.src_dataset)
+        self.source_sequence_length = self.src_seq_len
     else:
         source = iterator.source
         self.source_sequence_length = iterator.source_sequence_length

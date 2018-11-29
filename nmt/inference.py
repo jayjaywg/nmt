@@ -37,7 +37,9 @@ def _decode_inference_indices(model, sess, output_infer,
                               output_infer_summary_prefix,
                               inference_indices,
                               tgt_eos,
-                              subword_option):
+                              subword_option,
+                              cell_direct,
+                              unit_type):
   """Decoding only a specific set of sentences."""
   utils.print_out("  decoding to output %s , num sents %d." %
                   (output_infer, len(inference_indices)))
@@ -60,12 +62,20 @@ def _decode_inference_indices(model, sess, output_infer,
 
     for decode_id in inference_indices:
       nmt_outputs, infer_summary, _, encoder_state = model.decode(sess)
-      if isinstance(encoder_state[-1], np.ndarray):
-          encoder_last_hidden_output = encoder_state[-1]
-      elif isinstance(encoder_state[-1], tf.contrib.rnn.LSTMStateTuple) and encoder_state[-1].__len__() == 2:
-          encoder_last_hidden_output = encoder_state[-1][1]
-      else:
-          raise ValueError("Unknown unit_type, only support lstm and gru for now")
+      if cell_direct == "uni":
+          if unit_type=="gru":
+              encoder_last_hidden_output = encoder_state[-1]
+          elif unit_type=="lstm":
+              encoder_last_hidden_output = encoder_state[-1].h
+          else:
+              raise ValueError("Unknown unit_type, only support lstm and gru for now")
+      elif cell_direct == "bi": # encoder last hidden state is concat of last forward layer and last backward layer
+          if unit_type=="gru":
+              encoder_last_hidden_output = np.concatenate((encoder_state[-2], encoder_state[-1]),axis=-1)
+          elif unit_type=="lstm":
+              encoder_last_hidden_output = np.concatenate((encoder_state[-2].h, encoder_state[-1].h),axis=-1)
+          else:
+              raise ValueError("Unknown unit_type, only support lstm and gru for now")
       # get text translation
       assert nmt_outputs.shape[0] == 1
 
@@ -172,7 +182,9 @@ def single_worker_inference(infer_model,
           output_infer_summary_prefix=output_infer,
           inference_indices=hparams.inference_indices,
           tgt_eos=hparams.eos,
-          subword_option=hparams.subword_option)
+          subword_option=hparams.subword_option,
+          cell_direct=hparams.encoder_type,
+          unit_type=hparams.unit_type)
     else:
       nmt_utils.decode_and_evaluate(
           "infer",
@@ -184,6 +196,8 @@ def single_worker_inference(infer_model,
           subword_option=hparams.subword_option,
           beam_width=hparams.beam_width,
           tgt_eos=hparams.eos,
+          cell_direct=hparams.encoder_type,
+          unit_type=hparams.unit_type,
           num_translations_per_input=hparams.num_translations_per_input)
 
 
@@ -232,7 +246,9 @@ def multi_worker_inference(infer_model,
         subword_option=hparams.subword_option,
         beam_width=hparams.beam_width,
         tgt_eos=hparams.eos,
-        num_translations_per_input=hparams.num_translations_per_input)
+        cell_direct = hparams.encoder_type,
+        unit_type = hparams.unit_type,
+        num_translations_per_input = hparams.num_translations_per_input)
 
     # Change file name to indicate the file writing is completed.
     tf.gfile.Rename(output_infer, output_infer_done, overwrite=True)

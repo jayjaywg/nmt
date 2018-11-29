@@ -105,8 +105,10 @@ def load_embed_txt(embed_file):
   """
   emb_dict = dict()
   emb_size = None
+  i=0
   with codecs.getreader("utf-8")(tf.gfile.GFile(embed_file, 'rb')) as f:
     for line in f:
+      i=i+1
       tokens = line.strip().split(" ")
       word = tokens[0]
       vec = list(map(float, tokens[1:]))

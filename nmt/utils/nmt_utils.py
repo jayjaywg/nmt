@@ -37,6 +37,8 @@ def decode_and_evaluate(name,
                         subword_option,
                         beam_width,
                         tgt_eos,
+                        cell_direct,
+                        unit_type,
                         num_translations_per_input=1,
                         decode=True):
   """Decode a test set and compute a score according to the evaluation task."""
@@ -66,12 +68,20 @@ def decode_and_evaluate(name,
       while True:
         try:
           nmt_outputs, _, _, encoder_state = model.decode(sess)
-          if isinstance(encoder_state[-1], np.ndarray):
-            encoder_last_hidden_output = encoder_state[-1]
-          elif isinstance(encoder_state[-1],tf.contrib.rnn.LSTMStateTuple) and encoder_state[-1].__len__() == 2:
-            encoder_last_hidden_output = encoder_state[-1][1]
-          else:
-            raise ValueError("Unknown unit_type, only support lstm and gru for now")
+          if cell_direct == "uni":
+            if unit_type == "gru":
+              encoder_last_hidden_output = encoder_state[-1]
+            elif unit_type == "lstm":
+              encoder_last_hidden_output = encoder_state[-1].h
+            else:
+              raise ValueError("Unknown unit_type, only support lstm and gru for now")
+          elif cell_direct == "bi":  # encoder last hidden state is concat of last forward layer and last backward layer
+            if unit_type == "gru":
+              encoder_last_hidden_output = np.concatenate((encoder_state[-2], encoder_state[-1]),axis=-1)
+            elif unit_type == "lstm":
+              encoder_last_hidden_output = np.concatenate((encoder_state[-2].h, encoder_state[-1].h),axis=-1)
+            else:
+              raise ValueError("Unknown unit_type, only support lstm and gru for now")
           if beam_width == 0:
             nmt_outputs = np.expand_dims(nmt_outputs, 0)
 
@@ -88,7 +98,7 @@ def decode_and_evaluate(name,
                   subword_option=subword_option)
               trans_f.write((translation + b"\n").decode("utf-8"))
             trans_f_vec.write((','.join(map(str,encoder_vec)) + "\n"))
-        except tf.errors.OutOfRangeError:
+        except tf.errors.OutOfRangeError as err:
           utils.print_time(
               "  done, num sentences %d, num translations per input %d" %
               (num_sentences, num_translations_per_input), start_time)

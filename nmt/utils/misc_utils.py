@@ -93,7 +93,7 @@ def load_hparams(model_dir):
       try:
         hparams_values = json.load(f)
         hparams = tf.contrib.training.HParams(**hparams_values)
-      except ValueError:
+      except ValueError as err:
         print_out("  can't load hparams file")
         return None
     return hparams

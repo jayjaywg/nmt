@@ -168,7 +168,7 @@ class Exporter(object):
       #     subword_option=self.hparams.subword_option)
 
       # test exported model logic
-      test_data_set = ["预 测 一 下 今 年 世 界 杯 谁 会 赢", "今 年 世 界 杯"]
+      test_data_set = ["最 好 的 分 辨 率","1 8 岁 的 人 该 干 些 什 么 事","最 好 的 分 辨 率 w 1"]
       encoder_vec, inference_output = sess.run(
           [encoder_last_hidden_output,
            nmt_outputs],
@@ -231,7 +231,7 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None, src_
       reverse_tgt_vocab_table = lookup_ops.index_to_string_table_from_file(
           tgt_vocab_file, default_value=vocab_utils.UNK)
 
-      # max len of seqence
+      # max len of sequence
       src_seq_len = tf.map_fn(lambda src: tf.size(tf.string_split([src]).values), src_seqs_placeholder, dtype=tf.int32)
       max_seq_len=tf.reduce_max(src_seq_len)
 
@@ -249,6 +249,7 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None, src_
       batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64)
 
       src_seq_len = tf.transpose(src_seq_len)
+
       model = model_creator(
           hparams,
           iterator=None,
@@ -276,13 +277,13 @@ def _string_padding(str2, current_length, max_length, padding_const):
     return r[1]
 
 def _update_flags(flags, test_name):
-  flags.export_path = r"D:\guwang\git\nmt\nmt\model_export" # TODO guwang
+  flags.export_path = r"D:\guwang\work\QA\model\6_2\s2s_71_exported" # TODO guwang
   flags.version_number = None
   flags.ckpt_path = None
   flags.infer_file = "nmt/testdata/test_infer_file"
 
 if __name__ == "__main__":
-  out_dir = r"D:\guwang\git\nmt\nmt\nmt_model_cnSim_philly\\20"
+  out_dir = r"D:\guwang\work\QA\model\6_2\s2s_71"
   nmt_parser = argparse.ArgumentParser()
   nmt.add_arguments(nmt_parser)
   FLAGS, unparsed = nmt_parser.parse_known_args()

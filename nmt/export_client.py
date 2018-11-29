@@ -97,10 +97,10 @@ def do_inference(host):
     IOError: An error occurred processing test data set.
   """
   # test_data_set = ["预 测 一 下 今 年 世 界 杯 谁 会 赢", "今 年 世 界 杯"]
-  with open(r"D:\guwang\temp\[QnA] [cn] Label of Similar pair Zhidao 体育_0.tsv", "r", encoding="utf-8") as f:
+  with open(r"D:\guwang\src\ConsoleAppTemp1\Seq2Seq.TFServing.Client\[QnA] [cn] Label of Similar pair Zhidao all cat part1.tsv", "r", encoding="utf-8") as f:
       test_data_set = f.readlines()
   test_data_set = list(q.split('\t')[0] for q in test_data_set)
-  test_data_set = test_data_set[:1]
+  test_data_set = test_data_set[:10]
   channel = grpc.insecure_channel(host+":8500")
   stub = prediction_service_pb2_grpc.PredictionServiceStub(channel)
   # result_counter = _ResultCounter(num_tests, concurrency)
